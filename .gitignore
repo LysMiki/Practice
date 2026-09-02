@@ -1,10 +1,20 @@
+# DDEV
+.ddev/
 
-###> symfony/framework-bundle ###
+# Local environment
+/.env
 /.env.local
 /.env.local.php
 /.env.*.local
+
+# Symfony secrets
 /config/secrets/prod/prod.decrypt.private.php
-/public/bundles/
+
+# Generated files
 /var/
 /vendor/
-###< symfony/framework-bundle ###
+/public/bundles/
+/public/build/
+
+# IDE
+/.idea/

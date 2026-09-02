@@ -2,12 +2,18 @@
 
 namespace App\Controller;
 
+use App\Application\User\DTO\CreateUserRequest;
+use App\Application\User\DTO\UpdateUserRequest;
+use App\Application\User\UserService;
 use App\Entity\User;
 use App\Repository\UserRepository;
+use App\Security\UserVoter;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Attribute\MapRequestPayload;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
 
@@ -16,11 +22,9 @@ final class UserController extends AbstractController
     #[Route('/v1/api/users', methods: ['GET'])]
     public function index(UserRepository $userRepository): JsonResponse
     {
-        if ($this->isGranted('ROLE_ROOT')) {
-            $users = $userRepository->findAll();
-        } else {
-            $users = [$this->getUser()];
-        }
+        $users = $this->isGranted('ROLE_ROOT')
+            ? $userRepository->findAll()
+            : [$this->getUser()];
 
         $data = [];
 
@@ -38,78 +42,31 @@ final class UserController extends AbstractController
 
     #[Route('/v1/api/users', methods: ['POST'])]
     public function create(
-        Request $request,
-        EntityManagerInterface $entityManager,
-        ValidatorInterface $validator
+        #[MapRequestPayload] CreateUserRequest $request,
+        UserService $userService,
     ): JsonResponse {
-        $data = json_decode($request->getContent(), true);
-
-        if (!is_array($data)) {
-            return $this->json([
-                'error' => 'Invalid JSON'
-            ], 400);
-        }
-
-        $user = new User();
-
-        $user->setLogin($data['login'] ?? '');
-        $user->setPhone($data['phone'] ?? '');
-        $user->setPass($data['pass'] ?? '');
-
-        $errors = $validator->validate($user);
-
-        if (count($errors) > 0) {
-            $validationErrors = [];
-
-            foreach ($errors as $error) {
-                $validationErrors[] = [
-                    'field' => $error->getPropertyPath(),
-                    'message' => $error->getMessage(),
-                ];
-            }
-
-            return $this->json([
-                'error' => 'Validation failed',
-                'violations' => $validationErrors,
-            ], 422);
-        }
-        $entityManager->persist($user);
-
-        try {
-            $entityManager->flush();
-        } catch (\Doctrine\DBAL\Exception\UniqueConstraintViolationException) {
-            return $this->json([
-                'error' => 'User with this login and pass already exists'
-            ], 409);
-        }
+        $user = $userService->create($request);
 
         return $this->json([
             'id' => $user->getId(),
             'login' => $user->getLogin(),
             'phone' => $user->getPhone(),
             'pass' => $user->getPass(),
-        ], 201);
+        ], Response::HTTP_CREATED);
     }
 
     #[Route('/v1/api/users/{id}', methods: ['GET'])]
-    public function show(int $id, UserRepository $userRepository): JsonResponse
-    {
+    public function show(
+        int $id,
+        UserRepository $userRepository,
+    ): JsonResponse {
         $user = $userRepository->find($id);
 
         if ($user === null) {
-            return $this->json([
-                'error' => 'User not found'
-            ], 404);
+            throw $this->createNotFoundException('User not found');
         }
 
-        if (
-            !$this->isGranted('ROLE_ROOT')
-            && $this->getUser()->getId() !== $user->getId()
-        ) {
-            return $this->json([
-                'error' => 'Access denied'
-            ], 403);
-        }
+        $this->denyAccessUnlessGranted(UserVoter::VIEW, $user);
 
         return $this->json([
             'id' => $user->getId(),
@@ -122,65 +79,19 @@ final class UserController extends AbstractController
     #[Route('/v1/api/users/{id}', methods: ['PUT'])]
     public function update(
         int $id,
-        Request $request,
+        #[MapRequestPayload] UpdateUserRequest $request,
         UserRepository $userRepository,
-        EntityManagerInterface $entityManager,
-        ValidatorInterface $validator
+        UserService $userService,
     ): JsonResponse {
         $user = $userRepository->find($id);
 
         if ($user === null) {
-            return $this->json([
-                'error' => 'User not found'
-            ], 404);
+            throw $this->createNotFoundException('User not found');
         }
 
-        if (
-            !$this->isGranted('ROLE_ROOT')
-            && $this->getUser()->getId() !== $user->getId()
-        ) {
-            return $this->json([
-                'error' => 'Access denied'
-            ], 403);
-        }
+        $this->denyAccessUnlessGranted(UserVoter::EDIT, $user);
 
-        $data = json_decode($request->getContent(), true);
-
-        if (!is_array($data)) {
-            return $this->json([
-                'error' => 'Invalid JSON'
-            ], 400);
-        }
-
-        $user->setLogin($data['login'] ?? '');
-        $user->setPhone($data['phone'] ?? '');
-        $user->setPass($data['pass'] ?? '');
-
-        $errors = $validator->validate($user);
-
-        if (count($errors) > 0) {
-            $validationErrors = [];
-
-            foreach ($errors as $error) {
-                $validationErrors[] = [
-                    'field' => $error->getPropertyPath(),
-                    'message' => $error->getMessage(),
-                ];
-            }
-
-            return $this->json([
-                'error' => 'Validation failed',
-                'violations' => $validationErrors,
-            ], 422);
-        }
-
-        try {
-            $entityManager->flush();
-        } catch (\Doctrine\DBAL\Exception\UniqueConstraintViolationException) {
-            return $this->json([
-                'error' => 'User with this login and pass already exists'
-            ], 409);
-        }
+        $user = $userService->update($user, $request);
 
         return $this->json([
             'id' => $user->getId(),
@@ -194,27 +105,20 @@ final class UserController extends AbstractController
     public function delete(
         int $id,
         UserRepository $userRepository,
-        EntityManagerInterface $entityManager
+        UserService $userService,
     ): JsonResponse {
-        if (!$this->isGranted('ROLE_ROOT')) {
-            return $this->json([
-                'error' => 'Access denied'
-            ], 403);
-        }
-
         $user = $userRepository->find($id);
 
         if ($user === null) {
-            return $this->json([
-                'error' => 'User not found'
-            ], 404);
+            throw $this->createNotFoundException('User not found');
         }
 
-        $entityManager->remove($user);
-        $entityManager->flush();
+        $this->denyAccessUnlessGranted(UserVoter::DELETE, $user);
+
+        $userService->delete($user);
 
         return $this->json([
-            'message' => 'User deleted'
+            'message' => 'User deleted',
         ]);
     }
 }

@@ -2,9 +2,10 @@
 
 namespace App\EventSubscriber;
 
+use App\Exception\UserAlreadyExistsException;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Event\ExceptionEvent;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Symfony\Component\HttpKernel\KernelEvents;
@@ -27,6 +28,16 @@ final class ApiExceptionSubscriber implements EventSubscriberInterface
         }
 
         $exception = $event->getThrowable();
+
+        if ($exception instanceof UserAlreadyExistsException) {
+            $event->setResponse(
+                new JsonResponse(
+                    ['error' => 'User with this login and pass already exists'],
+                    Response::HTTP_CONFLICT,
+                )
+            );
+            return;
+        }
 
         if ($exception instanceof HttpExceptionInterface) {
             $statusCode = $exception->getStatusCode();
